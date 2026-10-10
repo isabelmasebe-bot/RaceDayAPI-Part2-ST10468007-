@@ -298,5 +298,62 @@ namespace RaceDayAPI.Controllers
                 Message = "Category added to event successfully"
             });
         }
+
+        // GET: /api/events/{eventId}/enrolments
+        // Organiser (owner) only – list all enrolments for this event
+        [HttpGet("{eventId}/enrolments")]
+        public async Task<IActionResult> GetEventEnrolments(int eventId)
+        {
+            var userId = GetUserId();
+            var role = GetRole();
+
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
+
+            if (role != "Organiser")
+                return Forbid();
+
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == eventId);
+
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            // Ownership check
+            if (eventItem.Organizer.UserId != userId)
+                return Forbid();
+
+            var enrolments = await _context.Enrollments
+                .Where(e => e.EventCategory.EventId == eventId)
+                .Include(e => e.Participant)
+                .Include(e => e.EventCategory)
+                    .ThenInclude(ec => ec.Category)
+                .Include(e => e.Result)
+                .Select(e => new
+                {
+                    e.EnrollmentId,
+                    e.BibNumber,
+                    e.RegistrationStatus,
+                    e.RegisteredAt,
+                    Participant = new
+                    {
+                        e.Participant.FirstName,
+                        e.Participant.LastName,
+                        e.Participant.ParticipantId
+                    },
+                    Category = e.EventCategory.Category.CategoryName,
+                    EntryFee = e.EventCategory.EntryFee,
+                    Result = e.Result == null ? null : new
+                    {
+                        e.Result.FinishTime,
+                        e.Result.FinishPosition,
+                        e.Result.PerformanceStatus
+                    }
+                })
+                .ToListAsync();
+
+            return Ok(enrolments);
+        }
     }
 }
