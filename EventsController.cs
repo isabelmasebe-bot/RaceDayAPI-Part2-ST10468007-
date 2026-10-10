@@ -355,5 +355,41 @@ namespace RaceDayAPI.Controllers
 
             return Ok(enrolments);
         }
+
+        // GET: /api/events/{eventId}/results
+        // Public – leaderboard ordered by position
+        [HttpGet("{eventId}/results")]
+        public async Task<IActionResult> GetEventResults(int eventId)
+        {
+            var exists = await _context.Events.AnyAsync(e => e.EventId == eventId);
+            if (!exists)
+                return NotFound("Event not found.");
+
+            var results = await _context.Results
+                .Where(r => r.Enrollment.EventCategory.EventId == eventId)
+                .Include(r => r.Enrollment)
+                    .ThenInclude(e => e.Participant)
+                .Include(r => r.Enrollment)
+                    .ThenInclude(e => e.EventCategory)
+                        .ThenInclude(ec => ec.Category)
+                .OrderBy(r => r.FinishPosition ?? int.MaxValue) // nulls last
+                .Select(r => new
+                {
+                    r.ResultId,
+                    r.FinishTime,
+                    r.FinishPosition,
+                    r.PerformanceStatus,
+                    Participant = new
+                    {
+                        r.Enrollment.Participant.FirstName,
+                        r.Enrollment.Participant.LastName,
+                        r.Enrollment.BibNumber
+                    },
+                    Category = r.Enrollment.EventCategory.Category.CategoryName
+                })
+                .ToListAsync();
+
+            return Ok(results);
+        }
     }
 }
