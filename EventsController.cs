@@ -218,5 +218,85 @@ namespace RaceDayAPI.Controllers
 
             return NoContent(); // 204
         }
+
+        // GET: /api/events/{eventId}/categories
+        // Public
+        [HttpGet("{eventId}/categories")]
+        public async Task<IActionResult> GetEventCategories(int eventId)
+        {
+            var exists = await _context.Events.AnyAsync(e => e.EventId == eventId);
+            if (!exists)
+                return NotFound("Event not found.");
+
+            var categories = await _context.EventCategories
+                .Where(ec => ec.EventId == eventId)
+                .Include(ec => ec.Category)
+                .Select(ec => new
+                {
+                    ec.EventCategoryId,
+                    ec.CategoryId,
+                    CategoryName = ec.Category.CategoryName,
+                    ec.Category.MinAge,
+                    ec.Category.MaxAge,
+                    ec.EntryFee
+                })
+                .ToListAsync();
+
+            return Ok(categories);
+        }
+
+        // POST: /api/events/{eventId}/categories
+        // Only the owner Organiser can add a category to their event
+        [HttpPost("{eventId}/categories")]
+        public async Task<IActionResult> AddCategoryToEvent(int eventId, [FromBody] AddCategoryToEventDto dto)
+        {
+            var userId = GetUserId();
+            var role = GetRole();
+
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
+
+            if (role != "Organiser")
+                return Forbid();
+
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == eventId);
+
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            // Ownership check
+            if (eventItem.Organizer.UserId != userId)
+                return Forbid();
+
+            // Check if category exists
+            var categoryExists = await _context.Categories.AnyAsync(c => c.CategoryId == dto.CategoryId);
+            if (!categoryExists)
+                return BadRequest("Category does not exist.");
+
+            // Prevent duplicate
+            var alreadyLinked = await _context.EventCategories
+                .AnyAsync(ec => ec.EventId == eventId && ec.CategoryId == dto.CategoryId);
+
+            if (alreadyLinked)
+                return Conflict("This category is already linked to the event.");
+
+            var eventCategory = new EventCategory
+            {
+                EventId = eventId,
+                CategoryId = dto.CategoryId,
+                EntryFee = dto.EntryFee
+            };
+
+            _context.EventCategories.Add(eventCategory);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetEventCategories), new { eventId }, new
+            {
+                eventCategory.EventCategoryId,
+                Message = "Category added to event successfully"
+            });
+        }
     }
 }
