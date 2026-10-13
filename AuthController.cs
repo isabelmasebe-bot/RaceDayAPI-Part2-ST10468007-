@@ -7,6 +7,9 @@ using BCrypt.Net;
 
 namespace RaceDayAPI.Controllers
 {
+    /// <summary>
+    /// Handles user registration, login, logout and current session information.
+    /// </summary>
     [Route("api/auth")]
     [ApiController]
     public class AuthController : ControllerBase
@@ -18,22 +21,26 @@ namespace RaceDayAPI.Controllers
             _context = context;
         }
 
-        // POST: /api/auth/register
+        /// <summary>
+        /// Register a new user as either Organiser or Participant.
+        /// </summary>
+        /// <param name="dto">Registration details including role</param>
+        /// <returns>201 Created with user info, 400 validation error, or 409 if email already exists</returns>
         [HttpPost("register")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> Register([FromBody] RegisterDto dto)
         {
-            // Validation
             if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
                 return BadRequest("Email and Password are required.");
 
             if (dto.Role != "Organiser" && dto.Role != "Participant")
                 return BadRequest("Role must be either 'Organiser' or 'Participant'.");
 
-            // Check if email already exists
             if (await _context.UserAccounts.AnyAsync(u => u.Email == dto.Email))
                 return Conflict("Email already exists.");
 
-            // Create UserAccount
             var user = new UserAccount
             {
                 Email = dto.Email,
@@ -45,28 +52,25 @@ namespace RaceDayAPI.Controllers
             _context.UserAccounts.Add(user);
             await _context.SaveChangesAsync();
 
-            // Create profile based on role
             if (dto.Role == "Organiser")
             {
-                var organizer = new OrganizerProfile
+                _context.OrganizerProfiles.Add(new OrganizerProfile
                 {
                     UserId = user.UserId,
                     OrganisationName = dto.OrganisationName ?? "My Organisation",
                     ContactPhone = dto.Phone
-                };
-                _context.OrganizerProfiles.Add(organizer);
+                });
             }
-            else // Participant
+            else
             {
-                var participant = new ParticipantProfile
+                _context.ParticipantProfiles.Add(new ParticipantProfile
                 {
                     UserId = user.UserId,
                     FirstName = dto.FirstName ?? "",
                     LastName = dto.LastName ?? "",
                     DateOfBirth = dto.DateOfBirth,
                     EmergencyContact = dto.EmergencyContact
-                };
-                _context.ParticipantProfiles.Add(participant);
+                });
             }
 
             await _context.SaveChangesAsync();
@@ -80,8 +84,13 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // POST: /api/auth/login
+        /// <summary>
+        /// Authenticate a user and create a session.
+        /// </summary>
         [HttpPost("login")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> Login([FromBody] LoginDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
@@ -93,7 +102,6 @@ namespace RaceDayAPI.Controllers
             if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
                 return Unauthorized("Invalid email or password.");
 
-            // Store user info in Session
             HttpContext.Session.SetInt32("UserId", user.UserId);
             HttpContext.Session.SetString("Role", user.Role);
             HttpContext.Session.SetString("Email", user.Email);
@@ -107,16 +115,23 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // POST: /api/auth/logout
+        /// <summary>
+        /// Clear the current user session (logout).
+        /// </summary>
         [HttpPost("logout")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public IActionResult Logout()
         {
             HttpContext.Session.Clear();
             return Ok(new { Message = "Logged out successfully" });
         }
 
-        // GET: /api/auth/me  (to check who is currently logged in)
+        /// <summary>
+        /// Get information about the currently logged-in user.
+        /// </summary>
         [HttpGet("me")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public IActionResult Me()
         {
             var userId = HttpContext.Session.GetInt32("UserId");

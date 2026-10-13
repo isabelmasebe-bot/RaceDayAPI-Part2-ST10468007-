@@ -7,6 +7,9 @@ using System.Globalization;
 
 namespace RaceDayAPI.Controllers
 {
+    /// <summary>
+    /// Manage race results and personal performance history.
+    /// </summary>
     [Route("api/results")]
     [ApiController]
     public class ResultsController : ControllerBase
@@ -21,8 +24,16 @@ namespace RaceDayAPI.Controllers
         private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
-        // POST: /api/results
+        /// <summary>
+        /// Record a result for an enrolment. Only the Organiser who owns the event can do this.
+        /// </summary>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> CreateResult([FromBody] CreateResultDto dto)
         {
             var userId = GetUserId();
@@ -79,8 +90,12 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // GET: /api/results/{id}
+        /// <summary>
+        /// Get a single result by its ID.
+        /// </summary>
         [HttpGet("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetResultById(int id)
         {
             var result = await _context.Results
@@ -113,8 +128,13 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // GET: /api/users/me/results
+        /// <summary>
+        /// Get the personal performance history of the currently logged-in participant.
+        /// </summary>
         [HttpGet("/api/users/me/results")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetMyResults()
         {
             var userId = GetUserId();

@@ -6,6 +6,9 @@ using RaceDayAPI.Models;
 
 namespace RaceDayAPI.Controllers
 {
+    /// <summary>
+    /// Manage global categories that can be linked to events.
+    /// </summary>
     [Route("api/categories")]
     [ApiController]
     public class CategoriesController : ControllerBase
@@ -17,11 +20,13 @@ namespace RaceDayAPI.Controllers
             _context = context;
         }
 
-        private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
-        // GET: /api/categories
+        /// <summary>
+        /// Get a list of all available categories.
+        /// </summary>
         [HttpGet]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAllCategories()
         {
             var categories = await _context.Categories
@@ -37,8 +42,13 @@ namespace RaceDayAPI.Controllers
             return Ok(categories);
         }
 
-        // POST: /api/categories
+        /// <summary>
+        /// Create a new global category. Only Organisers can perform this action.
+        /// </summary>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryDto dto)
         {
             if (GetRole() != "Organiser")
@@ -60,8 +70,13 @@ namespace RaceDayAPI.Controllers
             return CreatedAtAction(nameof(GetAllCategories), new { id = category.CategoryId }, category);
         }
 
-        // PUT: /api/categories/{id}
+        /// <summary>
+        /// Update an existing category. Only Organisers can perform this action.
+        /// </summary>
         [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UpdateCategory(int id, [FromBody] CreateCategoryDto dto)
         {
             if (GetRole() != "Organiser")
@@ -81,8 +96,14 @@ namespace RaceDayAPI.Controllers
             return Ok(new { Message = "Category updated successfully" });
         }
 
-        // DELETE: /api/categories/{id}
+        /// <summary>
+        /// Delete a category. Only allowed if the category is not linked to any event.
+        /// </summary>
         [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> DeleteCategory(int id)
         {
             if (GetRole() != "Organiser")

@@ -6,6 +6,9 @@ using RaceDayAPI.Models;
 
 namespace RaceDayAPI.Controllers
 {
+    /// <summary>
+    /// Handle participant enrolments into events.
+    /// </summary>
     [Route("api/enrolments")]
     [ApiController]
     public class EnrolmentsController : ControllerBase
@@ -20,8 +23,16 @@ namespace RaceDayAPI.Controllers
         private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
-        // POST: /api/enrolments
+        /// <summary>
+        /// Enrol the current participant into an event category.
+        /// </summary>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> Enrol([FromBody] EnrolDto dto)
         {
             var userId = GetUserId();
@@ -78,8 +89,13 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // GET: /api/enrolments/me
+        /// <summary>
+        /// Get all enrolments belonging to the currently logged-in participant.
+        /// </summary>
         [HttpGet("me")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> GetMyEnrolments()
         {
             var userId = GetUserId();
@@ -135,8 +151,15 @@ namespace RaceDayAPI.Controllers
             return Ok(enrolments);
         }
 
-        // PUT: /api/enrolments/{id}/cancel
+        /// <summary>
+        /// Cancel an enrolment belonging to the current participant.
+        /// </summary>
         [HttpPut("{id}/cancel")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> CancelEnrolment(int id)
         {
             var userId = GetUserId();

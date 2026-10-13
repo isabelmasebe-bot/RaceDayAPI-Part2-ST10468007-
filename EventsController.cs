@@ -6,6 +6,9 @@ using RaceDayAPI.Models;
 
 namespace RaceDayAPI.Controllers
 {
+    /// <summary>
+    /// Manage events, categories linked to events, enrolments and results.
+    /// </summary>
     [Route("api/events")]
     [ApiController]
     public class EventsController : ControllerBase
@@ -17,12 +20,14 @@ namespace RaceDayAPI.Controllers
             _context = context;
         }
 
-        // Helper methods
         private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
-        // GET: /api/events
+        /// <summary>
+        /// Get a list of all events. Can optionally filter by status (Upcoming, Closed, Completed).
+        /// </summary>
         [HttpGet]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAllEvents([FromQuery] string? status = null)
         {
             var query = _context.Events
@@ -50,8 +55,12 @@ namespace RaceDayAPI.Controllers
             return Ok(events);
         }
 
-        // GET: /api/events/{id}
+        /// <summary>
+        /// Get detailed information about a single event including its categories.
+        /// </summary>
         [HttpGet("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetEventById(int id)
         {
             var eventItem = await _context.Events
@@ -85,8 +94,14 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // POST: /api/events
+        /// <summary>
+        /// Create a new event. Only Organisers can perform this action.
+        /// </summary>
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> CreateEvent([FromBody] CreateEventDto dto)
         {
             var userId = GetUserId();
@@ -127,8 +142,14 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // PUT: /api/events/{id}
+        /// <summary>
+        /// Update an existing event. Only the Organiser who owns the event can update it.
+        /// </summary>
         [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UpdateEvent(int id, [FromBody] UpdateEventDto dto)
         {
             var userId = GetUserId();
@@ -152,32 +173,31 @@ namespace RaceDayAPI.Controllers
 
             if (!string.IsNullOrWhiteSpace(dto.EventName))
                 eventItem.EventName = dto.EventName;
-
             if (dto.EventDate.HasValue)
                 eventItem.EventDate = dto.EventDate.Value;
-
             if (!string.IsNullOrWhiteSpace(dto.Location))
                 eventItem.Location = dto.Location;
-
             if (dto.DistanceKm.HasValue)
                 eventItem.DistanceKm = dto.DistanceKm;
-
             if (dto.RouteUrl != null)
                 eventItem.RouteUrl = dto.RouteUrl;
-
             if (dto.WeatherEnabled.HasValue)
                 eventItem.WeatherEnabled = dto.WeatherEnabled.Value;
-
             if (!string.IsNullOrWhiteSpace(dto.Status))
                 eventItem.Status = dto.Status;
 
             await _context.SaveChangesAsync();
-
             return Ok(new { Message = "Event updated successfully" });
         }
 
-        // DELETE: /api/events/{id}
+        /// <summary>
+        /// Soft-delete (close) an event. Only the owning Organiser can perform this action.
+        /// </summary>
         [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> DeleteEvent(int id)
         {
             var userId = GetUserId();
@@ -205,8 +225,12 @@ namespace RaceDayAPI.Controllers
             return NoContent();
         }
 
-        // GET: /api/events/{eventId}/categories
+        /// <summary>
+        /// Get all categories linked to a specific event.
+        /// </summary>
         [HttpGet("{eventId}/categories")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetEventCategories(int eventId)
         {
             var exists = await _context.Events.AnyAsync(e => e.EventId == eventId);
@@ -230,8 +254,16 @@ namespace RaceDayAPI.Controllers
             return Ok(categories);
         }
 
-        // POST: /api/events/{eventId}/categories
+        /// <summary>
+        /// Add a category to an event (with entry fee). Only the owning Organiser can do this.
+        /// </summary>
         [HttpPost("{eventId}/categories")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> AddCategoryToEvent(int eventId, [FromBody] AddCategoryToEventDto dto)
         {
             var userId = GetUserId();
@@ -280,8 +312,14 @@ namespace RaceDayAPI.Controllers
             });
         }
 
-        // GET: /api/events/{eventId}/enrolments
+        /// <summary>
+        /// Get all enrolments for a specific event. Only the owning Organiser can view this.
+        /// </summary>
         [HttpGet("{eventId}/enrolments")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetEventEnrolments(int eventId)
         {
             var userId = GetUserId();
@@ -335,8 +373,12 @@ namespace RaceDayAPI.Controllers
             return Ok(enrolments);
         }
 
-        // GET: /api/events/{eventId}/results
+        /// <summary>
+        /// Get the results / leaderboard for a specific event (ordered by position).
+        /// </summary>
         [HttpGet("{eventId}/results")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetEventResults(int eventId)
         {
             var exists = await _context.Events.AnyAsync(e => e.EventId == eventId);
