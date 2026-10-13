@@ -21,7 +21,6 @@ namespace RaceDayAPI.Controllers
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
         // GET: /api/categories
-        // Public – list all available categories
         [HttpGet]
         public async Task<IActionResult> GetAllCategories()
         {
@@ -39,12 +38,11 @@ namespace RaceDayAPI.Controllers
         }
 
         // POST: /api/categories
-        // Organiser only – create a new global category
         [HttpPost]
         public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryDto dto)
         {
             if (GetRole() != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can create categories.");
 
             if (string.IsNullOrWhiteSpace(dto.CategoryName))
                 return BadRequest("Category name is required.");
@@ -67,7 +65,7 @@ namespace RaceDayAPI.Controllers
         public async Task<IActionResult> UpdateCategory(int id, [FromBody] CreateCategoryDto dto)
         {
             if (GetRole() != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can update categories.");
 
             var category = await _context.Categories.FindAsync(id);
             if (category == null)
@@ -88,7 +86,7 @@ namespace RaceDayAPI.Controllers
         public async Task<IActionResult> DeleteCategory(int id)
         {
             if (GetRole() != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can delete categories.");
 
             var category = await _context.Categories
                 .Include(c => c.EventCategories)

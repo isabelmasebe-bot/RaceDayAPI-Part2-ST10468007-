@@ -22,7 +22,6 @@ namespace RaceDayAPI.Controllers
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
         // GET: /api/events
-        // Public – list all events (optional filter by status)
         [HttpGet]
         public async Task<IActionResult> GetAllEvents([FromQuery] string? status = null)
         {
@@ -52,7 +51,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // GET: /api/events/{id}
-        // Public – get single event + categories
         [HttpGet("{id}")]
         public async Task<IActionResult> GetEventById(int id)
         {
@@ -88,7 +86,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // POST: /api/events
-        // Organiser only
         [HttpPost]
         public async Task<IActionResult> CreateEvent([FromBody] CreateEventDto dto)
         {
@@ -99,9 +96,8 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Organiser")
-                return Forbid(); // 403
+                return StatusCode(403, "Only Organisers can create events.");
 
-            // Find the OrganizerProfile linked to this user
             var organizer = await _context.OrganizerProfiles
                 .FirstOrDefaultAsync(o => o.UserId == userId);
 
@@ -117,7 +113,7 @@ namespace RaceDayAPI.Controllers
                 DistanceKm = dto.DistanceKm,
                 RouteUrl = dto.RouteUrl,
                 WeatherEnabled = dto.WeatherEnabled,
-                Status = dto.Status
+                Status = string.IsNullOrWhiteSpace(dto.Status) ? "Upcoming" : dto.Status
             };
 
             _context.Events.Add(newEvent);
@@ -132,7 +128,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // PUT: /api/events/{id}
-        // Only the owner Organiser can update
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateEvent(int id, [FromBody] UpdateEventDto dto)
         {
@@ -143,7 +138,7 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can update events.");
 
             var eventItem = await _context.Events
                 .Include(e => e.Organizer)
@@ -152,11 +147,9 @@ namespace RaceDayAPI.Controllers
             if (eventItem == null)
                 return NotFound("Event not found.");
 
-            // Check ownership
             if (eventItem.Organizer.UserId != userId)
-                return Forbid(); // Not the owner
+                return StatusCode(403, "You can only update your own events.");
 
-            // Update only the fields that were sent
             if (!string.IsNullOrWhiteSpace(dto.EventName))
                 eventItem.EventName = dto.EventName;
 
@@ -184,7 +177,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // DELETE: /api/events/{id}
-        // Soft delete = set status to "Closed" (or hard delete if you prefer)
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteEvent(int id)
         {
@@ -195,7 +187,7 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can delete events.");
 
             var eventItem = await _context.Events
                 .Include(e => e.Organizer)
@@ -204,23 +196,16 @@ namespace RaceDayAPI.Controllers
             if (eventItem == null)
                 return NotFound("Event not found.");
 
-            // Ownership check
             if (eventItem.Organizer.UserId != userId)
-                return Forbid();
+                return StatusCode(403, "You can only delete your own events.");
 
-            // Soft delete
             eventItem.Status = "Closed";
             await _context.SaveChangesAsync();
 
-            // If you want hard delete instead, use:
-            // _context.Events.Remove(eventItem);
-            // await _context.SaveChangesAsync();
-
-            return NoContent(); // 204
+            return NoContent();
         }
 
         // GET: /api/events/{eventId}/categories
-        // Public
         [HttpGet("{eventId}/categories")]
         public async Task<IActionResult> GetEventCategories(int eventId)
         {
@@ -246,7 +231,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // POST: /api/events/{eventId}/categories
-        // Only the owner Organiser can add a category to their event
         [HttpPost("{eventId}/categories")]
         public async Task<IActionResult> AddCategoryToEvent(int eventId, [FromBody] AddCategoryToEventDto dto)
         {
@@ -257,7 +241,7 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can add categories to events.");
 
             var eventItem = await _context.Events
                 .Include(e => e.Organizer)
@@ -266,16 +250,13 @@ namespace RaceDayAPI.Controllers
             if (eventItem == null)
                 return NotFound("Event not found.");
 
-            // Ownership check
             if (eventItem.Organizer.UserId != userId)
-                return Forbid();
+                return StatusCode(403, "You can only manage categories for your own events.");
 
-            // Check if category exists
             var categoryExists = await _context.Categories.AnyAsync(c => c.CategoryId == dto.CategoryId);
             if (!categoryExists)
                 return BadRequest("Category does not exist.");
 
-            // Prevent duplicate
             var alreadyLinked = await _context.EventCategories
                 .AnyAsync(ec => ec.EventId == eventId && ec.CategoryId == dto.CategoryId);
 
@@ -300,7 +281,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // GET: /api/events/{eventId}/enrolments
-        // Organiser (owner) only – list all enrolments for this event
         [HttpGet("{eventId}/enrolments")]
         public async Task<IActionResult> GetEventEnrolments(int eventId)
         {
@@ -311,7 +291,7 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Organiser")
-                return Forbid();
+                return StatusCode(403, "Only Organisers can view enrolments.");
 
             var eventItem = await _context.Events
                 .Include(e => e.Organizer)
@@ -320,9 +300,8 @@ namespace RaceDayAPI.Controllers
             if (eventItem == null)
                 return NotFound("Event not found.");
 
-            // Ownership check
             if (eventItem.Organizer.UserId != userId)
-                return Forbid();
+                return StatusCode(403, "You can only view enrolments for your own events.");
 
             var enrolments = await _context.Enrollments
                 .Where(e => e.EventCategory.EventId == eventId)
@@ -357,7 +336,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // GET: /api/events/{eventId}/results
-        // Public – leaderboard ordered by position
         [HttpGet("{eventId}/results")]
         public async Task<IActionResult> GetEventResults(int eventId)
         {
@@ -372,7 +350,7 @@ namespace RaceDayAPI.Controllers
                 .Include(r => r.Enrollment)
                     .ThenInclude(e => e.EventCategory)
                         .ThenInclude(ec => ec.Category)
-                .OrderBy(r => r.FinishPosition ?? int.MaxValue) // nulls last
+                .OrderBy(r => r.FinishPosition ?? int.MaxValue)
                 .Select(r => new
                 {
                     r.ResultId,

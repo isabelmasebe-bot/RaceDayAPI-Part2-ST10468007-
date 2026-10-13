@@ -17,7 +17,6 @@ namespace RaceDayAPI.Controllers
             _context = context;
         }
 
-        // Helper methods
         private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
@@ -37,7 +36,6 @@ namespace RaceDayAPI.Controllers
             if (user == null)
                 return NotFound("User not found.");
 
-            // Return different shape depending on role
             if (user.Role == "Organiser" && user.OrganizerProfile != null)
             {
                 return Ok(new

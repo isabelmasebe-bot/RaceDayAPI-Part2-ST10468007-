@@ -21,7 +21,6 @@ namespace RaceDayAPI.Controllers
         private string? GetRole() => HttpContext.Session.GetString("Role");
 
         // POST: /api/enrolments
-        // Participant only – enrol in an event + category
         [HttpPost]
         public async Task<IActionResult> Enrol([FromBody] EnrolDto dto)
         {
@@ -32,16 +31,14 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Participant")
-                return Forbid();
+                return StatusCode(403, "Only Participants can enrol.");
 
-            // Get the participant profile
             var participant = await _context.ParticipantProfiles
                 .FirstOrDefaultAsync(p => p.UserId == userId);
 
             if (participant == null)
                 return BadRequest("Participant profile not found.");
 
-            // Check if the event exists and is still open
             var eventItem = await _context.Events.FindAsync(dto.EventId);
             if (eventItem == null)
                 return NotFound("Event not found.");
@@ -49,14 +46,12 @@ namespace RaceDayAPI.Controllers
             if (eventItem.Status != "Upcoming")
                 return BadRequest("This event is closed or completed. Enrolment is not allowed.");
 
-            // Find the EventCategory link
             var eventCategory = await _context.EventCategories
                 .FirstOrDefaultAsync(ec => ec.EventId == dto.EventId && ec.CategoryId == dto.CategoryId);
 
             if (eventCategory == null)
                 return BadRequest("This category is not available for the selected event.");
 
-            // Check if already enrolled
             var alreadyEnrolled = await _context.Enrollments
                 .AnyAsync(e => e.ParticipantId == participant.ParticipantId
                             && e.EventCategoryId == eventCategory.EventCategoryId
@@ -65,14 +60,12 @@ namespace RaceDayAPI.Controllers
             if (alreadyEnrolled)
                 return Conflict("You are already enrolled in this event category.");
 
-            // Create the enrolment
             var enrolment = new Enrollment
             {
                 EventCategoryId = eventCategory.EventCategoryId,
                 ParticipantId = participant.ParticipantId,
                 RegistrationStatus = "Confirmed",
-                RegisteredAt = DateTime.UtcNow,
-                BibNumber = null // Can be assigned later by organiser
+                RegisteredAt = DateTime.UtcNow
             };
 
             _context.Enrollments.Add(enrolment);
@@ -86,7 +79,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // GET: /api/enrolments/me
-        // Participant only – list my enrolments + results
         [HttpGet("me")]
         public async Task<IActionResult> GetMyEnrolments()
         {
@@ -97,7 +89,7 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Participant")
-                return Forbid();
+                return StatusCode(403, "Only Participants can view their enrolments.");
 
             var participant = await _context.ParticipantProfiles
                 .FirstOrDefaultAsync(p => p.UserId == userId);
@@ -144,7 +136,6 @@ namespace RaceDayAPI.Controllers
         }
 
         // PUT: /api/enrolments/{id}/cancel
-        // Participant only – cancel own enrolment
         [HttpPut("{id}/cancel")]
         public async Task<IActionResult> CancelEnrolment(int id)
         {
@@ -155,7 +146,7 @@ namespace RaceDayAPI.Controllers
                 return Unauthorized("You must be logged in.");
 
             if (role != "Participant")
-                return Forbid();
+                return StatusCode(403, "Only Participants can cancel enrolments.");
 
             var participant = await _context.ParticipantProfiles
                 .FirstOrDefaultAsync(p => p.UserId == userId);
@@ -169,9 +160,8 @@ namespace RaceDayAPI.Controllers
             if (enrolment == null)
                 return NotFound("Enrolment not found.");
 
-            // Ownership check
             if (enrolment.ParticipantId != participant.ParticipantId)
-                return Forbid();
+                return StatusCode(403, "You can only cancel your own enrolments.");
 
             if (enrolment.RegistrationStatus == "Cancelled")
                 return BadRequest("This enrolment is already cancelled.");
