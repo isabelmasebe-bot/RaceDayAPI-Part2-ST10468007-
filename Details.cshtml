@@ -1,0 +1,92 @@
+﻿@using System.Text.Json
+@model JsonElement
+
+@{
+    ViewData["Title"] = "Event Details";
+    var role = Context.Session.GetString("Role");
+}
+
+<div class="container mt-4">
+
+    <!-- Banner -->
+    @if (Model.TryGetProperty("bannerUrl", out var banner) && banner.ValueKind != JsonValueKind.Null)
+    {
+        <img src="@banner.GetString()" class="img-fluid rounded mb-4 w-100" style="max-height:300px; object-fit:cover;" alt="Event Banner" />
+    }
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h2>@Model.GetProperty("eventName").GetString()</h2>
+            <p class="text-muted mb-1">
+                <strong>Date:</strong> @Model.GetProperty("eventDate").GetDateTime().ToString("dddd, dd MMMM yyyy")
+            </p>
+            <p class="text-muted mb-1">
+                <strong>Location:</strong> @Model.GetProperty("location").GetString()
+            </p>
+            @if (Model.TryGetProperty("distanceKm", out var dist) && dist.ValueKind != JsonValueKind.Null)
+            {
+                <p class="text-muted mb-1">
+                    <strong>Distance:</strong> @dist.GetDecimal() km
+                </p>
+            }
+            <p>
+                <span class="badge bg-success">@Model.GetProperty("status").GetString()</span>
+            </p>
+        </div>
+
+        @if (role == "Organiser")
+        {
+            <div>
+                <a asp-action="Index" class="btn btn-outline-secondary btn-sm">Back to My Events</a>
+            </div>
+        }
+    </div>
+
+    <hr />
+
+    <!-- Categories -->
+    <h4 class="mt-4">Available Categories</h4>
+
+    @if (Model.TryGetProperty("categories", out var categories) && categories.GetArrayLength() > 0)
+    {
+        <div class="row">
+            @foreach (var cat in categories.EnumerateArray())
+            {
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title">@cat.GetProperty("categoryName").GetString()</h5>
+                            @if (cat.TryGetProperty("entryFee", out var fee))
+                            {
+                                <p class="card-text">Entry Fee: R @fee.GetDecimal()</p>
+                            }
+                            @if (role == "Participant")
+                            {
+                                <form asp-controller="Enrolments" asp-action="Create" method="post">
+                                    <input type="hidden" name="eventId" value="@Model.GetProperty("eventId").GetInt32()" />
+                                    <input type="hidden" name="categoryId" value="@cat.GetProperty("categoryId").GetInt32()" />
+                                    <button type="submit" class="btn btn-primary btn-sm">Enrol</button>
+                                </form>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info">No categories have been added to this event yet.</div>
+    }
+
+    @if (role == "Organiser")
+    {
+        <div class="mt-4">
+            <a asp-controller="Categories" asp-action="Index" asp-route-eventId="@Model.GetProperty("eventId").GetInt32()"
+               class="btn btn-outline-primary">
+                Manage Categories for this Event
+            </a>
+        </div>
+    }
+
+</div>
