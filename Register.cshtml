@@ -1,0 +1,81 @@
+﻿@model RaceDayMVC.Models.RegisterViewModel
+
+@{
+    ViewData["Title"] = "Register";
+}
+
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h3 class="text-center mb-4">Create RaceDay Account</h3>
+
+                <form asp-action="Register" method="post">
+                    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                    <div class="mb-3">
+                        <label asp-for="Email" class="form-label"></label>
+                        <input asp-for="Email" class="form-control" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Password" class="form-label"></label>
+                        <input asp-for="Password" class="form-control" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Register as</label>
+                        <select asp-for="Role" class="form-select" id="roleSelect">
+                            <option value="Participant">Participant</option>
+                            <option value="Organiser">Organiser</option>
+                        </select>
+                    </div>
+
+                    <!-- Participant fields -->
+                    <div id="participantFields">
+                        <div class="mb-3">
+                            <label asp-for="FirstName" class="form-label">First Name</label>
+                            <input asp-for="FirstName" class="form-control" />
+                        </div>
+                        <div class="mb-3">
+                            <label asp-for="LastName" class="form-label">Last Name</label>
+                            <input asp-for="LastName" class="form-control" />
+                        </div>
+                    </div>
+
+                    <!-- Organiser fields -->
+                    <div id="organiserFields" style="display:none;">
+                        <div class="mb-3">
+                            <label asp-for="OrganisationName" class="form-label">Organisation Name</label>
+                            <input asp-for="OrganisationName" class="form-control" />
+                        </div>
+                        <div class="mb-3">
+                            <label asp-for="Phone" class="form-label">Phone</label>
+                            <input asp-for="Phone" class="form-control" />
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">Register</button>
+                </form>
+
+                <p class="text-center mt-3">
+                    Already have an account? <a asp-action="Login">Login here</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.getElementById("roleSelect").addEventListener("change", function () {
+            if (this.value === "Organiser") {
+                document.getElementById("participantFields").style.display = "none";
+                document.getElementById("organiserFields").style.display = "block";
+            } else {
+                document.getElementById("participantFields").style.display = "block";
+                document.getElementById("organiserFields").style.display = "none";
+            }
+        });
+    </script>
+}
