@@ -1,54 +1,66 @@
-﻿@model List<RaceDayMVC.Models.EventViewModel>
+﻿@using System.Text.Json
+@model List<JsonElement>
 
 @{
-    ViewData["Title"] = "My Events";
+    ViewData["Title"] = "Upcoming Events";
+    var role = Context.Session.GetString("Role");
 }
 
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>My Events</h2>
-        <a asp-action="Create" class="btn btn-primary">+ Create Event</a>
-    </div>
+        <h2>RaceDay Events</h2>
 
-    @if (TempData["Success"] != null)
-    {
-        <div class="alert alert-success">@TempData["Success"]</div>
-    }
+        <div class="btn-group">
+            <a asp-action="Index" asp-route-status="Upcoming"
+               class="btn btn-sm @(ViewBag.CurrentStatus == "Upcoming" ? "btn-primary" : "btn-outline-primary")">
+                Upcoming
+            </a>
+            <a asp-action="Index" asp-route-status="Closed"
+               class="btn btn-sm @(ViewBag.CurrentStatus == "Closed" ? "btn-primary" : "btn-outline-primary")">
+                Closed
+            </a>
+            <a asp-action="Index" asp-route-status="Completed"
+               class="btn btn-sm @(ViewBag.CurrentStatus == "Completed" ? "btn-primary" : "btn-outline-primary")">
+                Completed
+            </a>
+        </div>
+    </div>
 
     @if (Model == null || !Model.Any())
     {
-        <div class="alert alert-info">You have not created any events yet.</div>
+        <div class="alert alert-info">No events found.</div>
     }
     else
     {
-        <table class="table table-striped table-hover">
-            <thead class="table-dark">
-                <tr>
-                    <th>Name</th>
-                    <th>Date</th>
-                    <th>Location</th>
-                    <th>Status</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var item in Model)
-                {
-                    <tr>
-                        <td>@item.EventName</td>
-                        <td>@item.EventDate.ToString("dd MMM yyyy")</td>
-                        <td>@item.Location</td>
-                        <td>
-                            <span class="badge bg-@(item.Status == "Upcoming" ? "success" : "secondary")">
-                                @item.Status
-                            </span>
-                        </td>
-                        <td>
-                            <a asp-action="Details" asp-route-id="@item.EventId" class="btn btn-sm btn-outline-primary">Details</a>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <div class="row">
+            @foreach (var ev in Model)
+            {
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title">@ev.GetProperty("eventName").GetString()</h5>
+                            <p class="card-text mb-1">
+                                <strong>Date:</strong>
+                                @ev.GetProperty("eventDate").GetDateTime().ToString("dd MMM yyyy")
+                            </p>
+                            <p class="card-text mb-1">
+                                <strong>Location:</strong>
+                                @ev.GetProperty("location").GetString()
+                            </p>
+                            <p class="card-text">
+                                <span class="badge bg-success">@ev.GetProperty("status").GetString()</span>
+                            </p>
+                        </div>
+                        <div class="card-footer bg-white border-0">
+                            <a asp-controller="Events" asp-action="Details"
+                               asp-route-id="@ev.GetProperty("eventId").GetInt32()"
+                               class="btn btn-primary btn-sm">
+                                View Details
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
     }
 </div>
