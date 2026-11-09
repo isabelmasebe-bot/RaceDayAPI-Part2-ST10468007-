@@ -23,10 +23,36 @@
                 }
                 else
                 {
+                    var role = Context.Session.GetString("Role");
+
+                    @if (role == "Participant")
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Home" asp-action="Index">Events</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Profile" asp-action="Index">My Profile</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Enrolments" asp-action="MyResults">My Results</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Enrolments" asp-action="MyEnrolments">My Enrolments</a>
+                        </li>
+                    }
+                    else if (role == "Organiser")
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Organiser" asp-action="Dashboard">Dashboard</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Events" asp-action="Index">My Events</a>
+                        </li>
+                    }
+
                     <li class="nav-item">
                         <span class="nav-link text-dark">
-                            Hello, @Context.Session.GetString("Email")
-                            (@Context.Session.GetString("Role"))
+                            Hello, @Context.Session.GetString("Email") (@role)
                         </span>
                     </li>
                     <li class="nav-item">
