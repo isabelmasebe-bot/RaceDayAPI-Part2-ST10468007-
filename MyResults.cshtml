@@ -1,0 +1,57 @@
+﻿@using System.Text.Json
+@model List<JsonElement>
+
+@{
+    ViewData["Title"] = "My Results";
+}
+
+<div class="container mt-4">
+    <h2 class="mb-4">My Race Results</h2>
+
+    @if (Model == null || !Model.Any())
+    {
+        <div class="alert alert-info">
+            You do not have any recorded results yet.
+            Results appear after the Organiser enters them.
+        </div>
+    }
+    else
+    {
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Event</th>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Finish Time</th>
+                    <th>Position</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model)
+                {
+                    <tr>
+                        <td>@(r.TryGetProperty("event", out var ev) ? ev.GetString() : "—")</td>
+                        <td>
+                            @(r.TryGetProperty("eventDate", out var ed) && ed.ValueKind != JsonValueKind.Null
+                                                ? ed.GetDateTime().ToString("dd MMM yyyy") : "—")
+                                                                                             </td>
+                                                                                             <td>@(r.TryGetProperty("category", out var cat) ? cat.GetString() : "—")</td>
+                                                                                             <td>
+                            @(r.TryGetProperty("finishTime", out var ft) && ft.ValueKind != JsonValueKind.Null
+                                                ? ft.GetString() : "—")
+                                                                   </td>
+                                                                   <td>
+                            @(r.TryGetProperty("finishPosition", out var pos) && pos.ValueKind != JsonValueKind.Null
+                                                ? pos.GetInt32().ToString() : "—")
+                </td>
+                <td>
+                    @(r.TryGetProperty("performanceStatus", out var ps) ? ps.GetString() : "—")
+                </td>
+            </tr>
+                        }
+            </tbody>
+        </table>
+    }
+</div>

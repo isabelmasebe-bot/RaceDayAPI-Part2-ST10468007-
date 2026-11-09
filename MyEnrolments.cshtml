@@ -1,0 +1,57 @@
+﻿@using System.Text.Json
+@model List<JsonElement>
+
+@{
+    ViewData["Title"] = "My Enrolments";
+}
+
+<div class="container mt-4">
+    <h2 class="mb-4">My Enrolments</h2>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success">@TempData["Success"]</div>
+    }
+
+    @if (Model == null || !Model.Any())
+    {
+        <div class="alert alert-info">You have not enrolled in any events yet.</div>
+    }
+    else
+    {
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Event</th>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Registered</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model)
+                {
+                    var status = item.GetProperty("registrationStatus").GetString();
+                    var badgeClass = status switch
+                    {
+                        "Confirmed" => "bg-success",
+                        "Pending" => "bg-warning text-dark",
+                        "Cancelled" => "bg-secondary",
+                        _ => "bg-primary"
+                    };
+
+                    <tr>
+                        <td>@item.GetProperty("event").GetProperty("eventName").GetString()</td>
+                        <td>@item.GetProperty("event").GetProperty("eventDate").GetDateTime().ToString("dd MMM yyyy")</td>
+                        <td>@item.GetProperty("category").GetProperty("categoryName").GetString()</td>
+                        <td>
+                            <span class="badge @badgeClass">@status</span>
+                        </td>
+                        <td>@item.GetProperty("registeredAt").GetDateTime().ToString("dd MMM yyyy")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
