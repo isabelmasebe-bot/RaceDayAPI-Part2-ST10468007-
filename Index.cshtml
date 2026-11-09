@@ -1,66 +1,124 @@
 ﻿@using System.Text.Json
-@model List<JsonElement>
+@model JsonElement
 
 @{
-    ViewData["Title"] = "Upcoming Events";
-    var role = Context.Session.GetString("Role");
+    ViewData["Title"] = "My Profile";
+    var role = Context.Session.GetString("Role") ?? "";
+    var hasModel = Model.ValueKind == JsonValueKind.Object;
 }
 
 <div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>RaceDay Events</h2>
+    <h2 class="mb-4">My Profile</h2>
 
-        <div class="btn-group">
-            <a asp-action="Index" asp-route-status="Upcoming"
-               class="btn btn-sm @(ViewBag.CurrentStatus == "Upcoming" ? "btn-primary" : "btn-outline-primary")">
-                Upcoming
-            </a>
-            <a asp-action="Index" asp-route-status="Closed"
-               class="btn btn-sm @(ViewBag.CurrentStatus == "Closed" ? "btn-primary" : "btn-outline-primary")">
-                Closed
-            </a>
-            <a asp-action="Index" asp-route-status="Completed"
-               class="btn btn-sm @(ViewBag.CurrentStatus == "Completed" ? "btn-primary" : "btn-outline-primary")">
-                Completed
-            </a>
-        </div>
-    </div>
-
-    @if (Model == null || !Model.Any())
+    @if (TempData["Success"] != null)
     {
-        <div class="alert alert-info">No events found.</div>
+        <div class="alert alert-success">@TempData["Success"]</div>
+    }
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger">@TempData["Error"]</div>
+    }
+
+    @if (!hasModel)
+    {
+        <div class="alert alert-warning">Could not load profile data. Please try logging in again.</div>
     }
     else
     {
+        string email = Model.TryGetProperty("email", out var emailProp) ? emailProp.GetString() ?? "—" : "—";
+
+        string? picUrl = null;
+        string firstName = "";
+        string lastName = "";
+        string emergencyContact = "";
+        string organisationName = "";
+        string phone = "";
+
+        if (Model.TryGetProperty("profile", out var profile) && profile.ValueKind == JsonValueKind.Object)
+        {
+            if (profile.TryGetProperty("profilePictureUrl", out var pic) && pic.ValueKind == JsonValueKind.String)
+                picUrl = pic.GetString();
+
+            if (profile.TryGetProperty("firstName", out var fn))
+                firstName = fn.GetString() ?? "";
+            if (profile.TryGetProperty("lastName", out var ln))
+                lastName = ln.GetString() ?? "";
+            if (profile.TryGetProperty("emergencyContact", out var ec))
+                emergencyContact = ec.GetString() ?? "";
+            if (profile.TryGetProperty("organisationName", out var on))
+                organisationName = on.GetString() ?? "";
+            if (profile.TryGetProperty("contactPhone", out var ph))
+                phone = ph.GetString() ?? "";
+        }
+
         <div class="row">
-            @foreach (var ev in Model)
-            {
-                <div class="col-md-4 mb-4">
-                    <div class="card h-100 shadow-sm">
-                        <div class="card-body">
-                            <h5 class="card-title">@ev.GetProperty("eventName").GetString()</h5>
-                            <p class="card-text mb-1">
-                                <strong>Date:</strong>
-                                @ev.GetProperty("eventDate").GetDateTime().ToString("dd MMM yyyy")
-                            </p>
-                            <p class="card-text mb-1">
-                                <strong>Location:</strong>
-                                @ev.GetProperty("location").GetString()
-                            </p>
-                            <p class="card-text">
-                                <span class="badge bg-success">@ev.GetProperty("status").GetString()</span>
-                            </p>
+            <!-- Profile Picture -->
+            <div class="col-md-4 mb-4">
+                <div class="card shadow-sm text-center p-3">
+                    @if (!string.IsNullOrEmpty(picUrl))
+                    {
+                        <img src="@picUrl" class="rounded-circle mb-3"
+                             style="width:150px; height:150px; object-fit:cover;" alt="Profile" />
+                    }
+                    else
+                    {
+                        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center mx-auto mb-3"
+                             style="width:150px; height:150px; font-size:40px;">
+                            ?
                         </div>
-                        <div class="card-footer bg-white border-0">
-                            <a asp-controller="Events" asp-action="Details"
-                               asp-route-id="@ev.GetProperty("eventId").GetInt32()"
-                               class="btn btn-primary btn-sm">
-                                View Details
-                            </a>
-                        </div>
+                    }
+
+                    @if (role == "Participant")
+                    {
+                        <form asp-action="UploadPicture" method="post" enctype="multipart/form-data">
+                            <input type="file" name="file" class="form-control mb-2" accept="image/*" />
+                            <button type="submit" class="btn btn-outline-primary btn-sm w-100">Upload Picture</button>
+                        </form>
+                    }
+                </div>
+            </div>
+
+            <!-- Profile Details -->
+            <div class="col-md-8">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <p><strong>Email:</strong> @email</p>
+                        <p><strong>Role:</strong> @role</p>
+                        <hr />
+
+                        <form asp-action="Update" method="post">
+                            @if (role == "Participant")
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label">First Name</label>
+                                    <input name="firstName" class="form-control" value="@firstName" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Last Name</label>
+                                    <input name="lastName" class="form-control" value="@lastName" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Emergency Contact</label>
+                                    <input name="emergencyContact" class="form-control" value="@emergencyContact" />
+                                </div>
+                            }
+                            else if (role == "Organiser")
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label">Organisation Name</label>
+                                    <input name="organisationName" class="form-control" value="@organisationName" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Phone</label>
+                                    <input name="phone" class="form-control" value="@phone" />
+                                </div>
+                            }
+
+                            <button type="submit" class="btn btn-primary">Save Changes</button>
+                        </form>
                     </div>
                 </div>
-            }
+            </div>
         </div>
     }
 </div>
