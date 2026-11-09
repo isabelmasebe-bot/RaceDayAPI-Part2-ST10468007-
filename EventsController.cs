@@ -123,6 +123,31 @@ namespace RaceDayMVC.Controllers
             return View(json);
         }
 
+        // GET: /Events/Enrolments/5
+        public async Task<IActionResult> Enrolments(int id)
+        {
+            if (!IsOrganiser())
+                return RedirectToAction("Login", "Account");
+
+            var client = _httpClientFactory.CreateClient("RaceDayAPI");
+            var response = await client.GetAsync($"api/events/{id}/enrolments");
+
+            ViewBag.EventId = id;
+
+            var enrolments = new List<JsonElement>();
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+                enrolments = json.EnumerateArray().ToList();
+            }
+            else
+            {
+                ViewBag.Error = await response.Content.ReadAsStringAsync();
+            }
+
+            return View(enrolments);
+        }
+
     }
     
 }

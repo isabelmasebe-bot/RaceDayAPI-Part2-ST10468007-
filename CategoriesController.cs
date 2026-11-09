@@ -1,128 +1,107 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RaceDayAPI.Data;
-using RaceDayAPI.DTOs;
-using RaceDayAPI.Models;
+using RaceDayMVC.Models;
+using System.Net.Http.Json;
+using System.Text.Json;
 
-namespace RaceDayAPI.Controllers
+namespace RaceDayMVC.Controllers
 {
-    /// <summary>
-    /// Manage global categories that can be linked to events.
-    /// </summary>
-    [Route("api/categories")]
-    [ApiController]
-    public class CategoriesController : ControllerBase
+    public class CategoriesController : Controller
     {
-        private readonly ApplicationDbContext _context;
+        private readonly IHttpClientFactory _httpClientFactory;
 
-        public CategoriesController(ApplicationDbContext context)
+        public CategoriesController(IHttpClientFactory httpClientFactory)
         {
-            _context = context;
+            _httpClientFactory = httpClientFactory;
         }
 
-        private string? GetRole() => HttpContext.Session.GetString("Role");
+        private bool IsOrganiser() =>
+            HttpContext.Session.GetString("Role") == "Organiser";
 
-        /// <summary>
-        /// Get a list of all available categories.
-        /// </summary>
-        [HttpGet]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<IActionResult> GetAllCategories()
+        // GET: /Categories?eventId=5 / index method 
+        public async Task<IActionResult> Index(int eventId)
         {
-            var categories = await _context.Categories
-                .Select(c => new
-                {
-                    c.CategoryId,
-                    c.CategoryName,
-                    c.MinAge,
-                    c.MaxAge
-                })
-                .ToListAsync();
+            if (!IsOrganiser())
+                return RedirectToAction("Login", "Account");
 
-            return Ok(categories);
-        }
+            if (eventId == 0)
+                return RedirectToAction("Index", "Events");
 
-        /// <summary>
-        /// Create a new global category. Only Organisers can perform this action.
-        /// </summary>
-        [HttpPost]
-        [ProducesResponseType(StatusCodes.Status201Created)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryDto dto)
-        {
-            if (GetRole() != "Organiser")
-                return StatusCode(403, "Only Organisers can create categories.");
+            ViewBag.EventId = eventId;
 
-            if (string.IsNullOrWhiteSpace(dto.CategoryName))
-                return BadRequest("Category name is required.");
+            var client = _httpClientFactory.CreateClient("RaceDayAPI");
+            var linkedCategories = new List<JsonElement>();
 
-            var category = new Category
+            try
             {
-                CategoryName = dto.CategoryName,
-                MinAge = dto.MinAge,
-                MaxAge = dto.MaxAge
-            };
+                var response = await client.GetAsync($"api/events/{eventId}/categories");
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+                    linkedCategories = json.EnumerateArray().ToList();
+                }
+            }
+            catch { }
 
-            _context.Categories.Add(category);
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction(nameof(GetAllCategories), new { id = category.CategoryId }, category);
+            ViewBag.LinkedCategories = linkedCategories;
+            return View();
         }
 
-        /// <summary>
-        /// Update an existing category. Only Organisers can perform this action.
-        /// </summary>
-        [HttpPut("{id}")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> UpdateCategory(int id, [FromBody] CreateCategoryDto dto)
+        // GET: /Categories/Create?eventId=5
+        [HttpGet]
+        public IActionResult Create(int eventId)
         {
-            if (GetRole() != "Organiser")
-                return StatusCode(403, "Only Organisers can update categories.");
+            if (!IsOrganiser())
+                return RedirectToAction("Login", "Account");
 
-            var category = await _context.Categories.FindAsync(id);
-            if (category == null)
-                return NotFound("Category not found.");
-
-            if (!string.IsNullOrWhiteSpace(dto.CategoryName))
-                category.CategoryName = dto.CategoryName;
-
-            category.MinAge = dto.MinAge;
-            category.MaxAge = dto.MaxAge;
-
-            await _context.SaveChangesAsync();
-            return Ok(new { Message = "Category updated successfully" });
+            return View(new CategoryViewModel { EventId = eventId });
         }
 
-        /// <summary>
-        /// Delete a category. Only allowed if the category is not linked to any event.
-        /// </summary>
-        [HttpDelete("{id}")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> DeleteCategory(int id)
+        // POST: /Categories/Create
+        [HttpPost]
+        public async Task<IActionResult> Create(CategoryViewModel model)
         {
-            if (GetRole() != "Organiser")
-                return StatusCode(403, "Only Organisers can delete categories.");
+            if (!IsOrganiser())
+                return RedirectToAction("Login", "Account");
 
-            var category = await _context.Categories
-                .Include(c => c.EventCategories)
-                .FirstOrDefaultAsync(c => c.CategoryId == id);
+            if (!ModelState.IsValid)
+                return View(model);
 
-            if (category == null)
-                return NotFound("Category not found.");
+            var client = _httpClientFactory.CreateClient("RaceDayAPI");
 
-            if (category.EventCategories.Any())
-                return Conflict("Cannot delete category because it is linked to one or more events.");
+            // 1. Create the global category
+            var createResponse = await client.PostAsJsonAsync("api/categories", new
+            {
+                categoryName = model.CategoryName,
+                minAge = model.MinAge,
+                maxAge = model.MaxAge
+            });
 
-            _context.Categories.Remove(category);
-            await _context.SaveChangesAsync();
+            if (!createResponse.IsSuccessStatusCode)
+            {
+                var error = await createResponse.Content.ReadAsStringAsync();
+                ModelState.AddModelError("", $"Failed to create category: {error}");
+                return View(model);
+            }
 
-            return NoContent();
+            var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+            int categoryId = created.GetProperty("categoryId").GetInt32();
+
+            // 2. Link it to the event with entry fee
+            var linkResponse = await client.PostAsJsonAsync($"api/events/{model.EventId}/categories", new
+            {
+                categoryId = categoryId,
+                entryFee = model.EntryFee
+            });
+
+            if (!linkResponse.IsSuccessStatusCode)
+            {
+                var error = await linkResponse.Content.ReadAsStringAsync();
+                ModelState.AddModelError("", $"Category created but failed to link to event: {error}");
+                return View(model);
+            }
+
+            TempData["Success"] = "Category added successfully!";
+            return RedirectToAction("Index", new { eventId = model.EventId });
         }
     }
 }
