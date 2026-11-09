@@ -1,8 +1,56 @@
-﻿@{
-    ViewData["Title"] = "Home Page";
+﻿@using System.Text.Json
+@{
+    ViewData["Title"] = "Manage Categories";
+    var eventId = (int)ViewBag.EventId;
+    var linked = ViewBag.LinkedCategories as List<JsonElement> ?? new List<JsonElement>();
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Categories for Event</h2>
+        <div>
+            <a asp-action="Create" asp-route-eventId="@eventId" class="btn btn-primary">+ Add Category</a>
+            <a asp-controller="Events" asp-action="Details" asp-route-id="@eventId" class="btn btn-outline-secondary">Back to Event</a>
+        </div>
+    </div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success">@TempData["Success"]</div>
+    }
+
+    @if (!linked.Any())
+    {
+        <div class="alert alert-info">No categories linked to this event yet.</div>
+    }
+    else
+    {
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Category</th>
+                    <th>Min Age</th>
+                    <th>Max Age</th>
+                    <th>Entry Fee</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var cat in linked)
+                {
+                    <tr>
+                        <td>@cat.GetProperty("categoryName").GetString()</td>
+                        <td>
+                            @(cat.TryGetProperty("minAge", out var min) && min.ValueKind != JsonValueKind.Null
+                                                ? min.GetInt32().ToString() : "—")
+                                                                              </td>
+                                                                              <td>
+                            @(cat.TryGetProperty("maxAge", out var max) && max.ValueKind != JsonValueKind.Null
+                                                ? max.GetInt32().ToString() : "—")
+                </td>
+                <td>R @cat.GetProperty("entryFee").GetDecimal()</td>
+            </tr>
+                        }
+            </tbody>
+        </table>
+    }
 </div>
