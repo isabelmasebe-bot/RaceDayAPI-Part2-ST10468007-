@@ -1,153 +1,466 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using RaceDayMVC.Models;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using RaceDayAPI.Data;
+using RaceDayAPI.DTOs;
+using RaceDayAPI.Models;
+using RaceDayAPI.Services;
 
-namespace RaceDayMVC.Controllers
+namespace RaceDayAPI.Controllers
 {
-    public class EventsController : Controller
+    /// <summary>
+    /// Manage events, categories linked to events, enrolments and results.
+    /// </summary>
+    [Route("api/events")]
+    [ApiController]
+    public class EventsController : ControllerBase
     {
-        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ApplicationDbContext _context;
 
-        public EventsController(IHttpClientFactory httpClientFactory)
+        public EventsController(ApplicationDbContext context)
         {
-            _httpClientFactory = httpClientFactory;
+            _context = context;
         }
 
-        private bool IsOrganiser() =>
-            HttpContext.Session.GetString("Role") == "Organiser";
-
-        // GET: /Events
-        public async Task<IActionResult> Index()
+        private int? GetUserId()
         {
-            if (!IsOrganiser())
-                return RedirectToAction("Login", "Account");
+            var sessionId = HttpContext.Session.GetInt32("UserId");
+            if (sessionId.HasValue) return sessionId;
 
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
-            var response = await client.GetAsync("api/events");
-
-            if (!response.IsSuccessStatusCode)
+            if (Request.Headers.TryGetValue("X-User-Id", out var headerValue)
+                && int.TryParse(headerValue, out var id))
             {
-                ViewBag.Error = "Could not load events.";
-                return View(new List<EventViewModel>());
+                return id;
             }
-
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var events = new List<EventViewModel>();
-
-            foreach (var item in json.EnumerateArray())
-            {
-                events.Add(new EventViewModel
-                {
-                    EventId = item.GetProperty("eventId").GetInt32(),
-                    EventName = item.GetProperty("eventName").GetString() ?? "",
-                    EventDate = item.GetProperty("eventDate").GetDateTime(),
-                    Location = item.GetProperty("location").GetString() ?? "",
-                    Status = item.TryGetProperty("status", out var s) ? s.GetString() ?? "Upcoming" : "Upcoming"
-                });
-            }
-
-            return View(events);
+            return null;
         }
 
-        // GET: /Events/Create
+        private string? GetRole()
+        {
+            var sessionRole = HttpContext.Session.GetString("Role");
+            if (!string.IsNullOrEmpty(sessionRole)) return sessionRole;
+
+            if (Request.Headers.TryGetValue("X-User-Role", out var headerValue))
+                return headerValue;
+
+            return null;
+        }
+
+        /// <summary>
+        /// Get a list of all events. Can optionally filter by status (Upcoming, Closed, Completed).
+        /// </summary>
         [HttpGet]
-        public IActionResult Create()
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetAllEvents([FromQuery] string? status = null)
         {
-            if (!IsOrganiser())
-                return RedirectToAction("Login", "Account");
+            var query = _context.Events
+                .Include(e => e.Organizer)
+                .AsQueryable();
 
-            return View(new EventViewModel());
+            if (!string.IsNullOrEmpty(status))
+                query = query.Where(e => e.Status == status);
+
+            var events = await query
+                .Select(e => new
+                {
+                    e.EventId,
+                    e.EventName,
+                    e.EventDate,
+                    e.Location,
+                    e.DistanceKm,
+                    e.RouteUrl,
+                    e.WeatherEnabled,
+                    e.Status,
+                    e.BannerUrl,
+                    Organiser = e.Organizer.OrganisationName
+                })
+                .ToListAsync();
+
+            return Ok(events);
         }
 
-        // POST: /Events/Create
-        [HttpPost]
-        public async Task<IActionResult> Create(EventViewModel model)
+        /// <summary>
+        /// Get detailed information about a single event including its categories.
+        /// </summary>
+        [HttpGet("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetEventById(int id)
         {
-            if (!IsOrganiser())
-                return RedirectToAction("Login", "Account");
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .Include(e => e.EventCategories)
+                    .ThenInclude(ec => ec.Category)
+                .FirstOrDefaultAsync(e => e.EventId == id);
 
-            if (!ModelState.IsValid)
-                return View(model);
+            if (eventItem == null)
+                return NotFound("Event not found.");
 
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
-
-            var dto = new
+            return Ok(new
             {
-                eventName = model.EventName,
-                eventDate = model.EventDate,
-                location = model.Location,
-                distanceKm = model.DistanceKm,
-                routeUrl = model.RouteUrl,
-                weatherEnabled = model.WeatherEnabled,
-                status = "Upcoming"
+                eventItem.EventId,
+                eventItem.EventName,
+                eventItem.EventDate,
+                eventItem.Location,
+                eventItem.DistanceKm,
+                eventItem.RouteUrl,
+                eventItem.WeatherEnabled,
+                eventItem.Status,
+                eventItem.BannerUrl,
+                Organiser = eventItem.Organizer.OrganisationName,
+                Categories = eventItem.EventCategories.Select(ec => new
+                {
+                    ec.EventCategoryId,
+                    CategoryId = ec.CategoryId,
+                    CategoryName = ec.Category.CategoryName,
+                    ec.Category.MinAge,
+                    ec.Category.MaxAge,
+                    ec.EntryFee
+                })
+            });
+        }
+
+        /// <summary>
+        /// Create a new event. Only Organisers can perform this action.
+        /// </summary>
+        [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<IActionResult> CreateEvent([FromBody] CreateEventDto dto)
+        {
+            var userId = GetUserId();
+            var role = GetRole();
+
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
+
+            if (role != "Organiser")
+                return StatusCode(403, "Only Organisers can create events.");
+
+            var organizer = await _context.OrganizerProfiles
+                .FirstOrDefaultAsync(o => o.UserId == userId);
+
+            if (organizer == null)
+                return BadRequest("Organiser profile not found.");
+
+            var newEvent = new Event
+            {
+                OrganizerId = organizer.OrganizerId,
+                EventName = dto.EventName,
+                EventDate = dto.EventDate,
+                Location = dto.Location,
+                DistanceKm = dto.DistanceKm,
+                RouteUrl = dto.RouteUrl,
+                WeatherEnabled = dto.WeatherEnabled,
+                Status = string.IsNullOrWhiteSpace(dto.Status) ? "Upcoming" : dto.Status
             };
 
-            var response = await client.PostAsJsonAsync("api/events", dto);
+            _context.Events.Add(newEvent);
+            await _context.SaveChangesAsync();
 
-            if (!response.IsSuccessStatusCode)
+            return CreatedAtAction(nameof(GetEventById), new { id = newEvent.EventId }, new
             {
-                var error = await response.Content.ReadAsStringAsync();
-                ModelState.AddModelError("", $"Failed to create event: {error}");
-                return View(model);
-            }
-
-            // Optional: upload banner if a file was selected
-            if (model.BannerFile != null && model.BannerFile.Length > 0)
-            {
-                var created = await response.Content.ReadFromJsonAsync<JsonElement>();
-                int eventId = created.GetProperty("eventId").GetInt32();
-
-                using var content = new MultipartFormDataContent();
-                var streamContent = new StreamContent(model.BannerFile.OpenReadStream());
-                streamContent.Headers.ContentType = new MediaTypeHeaderValue(model.BannerFile.ContentType);
-                content.Add(streamContent, "file", model.BannerFile.FileName);
-
-                await client.PostAsync($"api/events/{eventId}/banner", content);
-            }
-
-            TempData["Success"] = "Event created successfully!";
-            return RedirectToAction("Index");
+                newEvent.EventId,
+                newEvent.EventName,
+                Message = "Event created successfully"
+            });
         }
-        // GET: /Events/Details/5
-        public async Task<IActionResult> Details(int id)
+
+        /// <summary>
+        /// Update an existing event. Only the Organiser who owns the event can update it.
+        /// </summary>
+        [HttpPut("{id}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> UpdateEvent(int id, [FromBody] UpdateEventDto dto)
         {
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
-            var response = await client.GetAsync($"api/events/{id}");
+            var userId = GetUserId();
+            var role = GetRole();
 
-            if (!response.IsSuccessStatusCode)
-                return NotFound();
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            return View(json);
+            if (role != "Organiser")
+                return StatusCode(403, "Only Organisers can update events.");
+
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == id);
+
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            if (eventItem.Organizer.UserId != userId)
+                return StatusCode(403, "You can only update your own events.");
+
+            if (!string.IsNullOrWhiteSpace(dto.EventName))
+                eventItem.EventName = dto.EventName;
+            if (dto.EventDate.HasValue)
+                eventItem.EventDate = dto.EventDate.Value;
+            if (!string.IsNullOrWhiteSpace(dto.Location))
+                eventItem.Location = dto.Location;
+            if (dto.DistanceKm.HasValue)
+                eventItem.DistanceKm = dto.DistanceKm;
+            if (dto.RouteUrl != null)
+                eventItem.RouteUrl = dto.RouteUrl;
+            if (dto.WeatherEnabled.HasValue)
+                eventItem.WeatherEnabled = dto.WeatherEnabled.Value;
+            if (!string.IsNullOrWhiteSpace(dto.Status))
+                eventItem.Status = dto.Status;
+
+            await _context.SaveChangesAsync();
+            return Ok(new { Message = "Event updated successfully" });
         }
 
-        // GET: /Events/Enrolments/5
-        public async Task<IActionResult> Enrolments(int id)
+        /// <summary>
+        /// Soft-delete (close) an event. Only the owning Organiser can perform this action.
+        /// </summary>
+        [HttpDelete("{id}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeleteEvent(int id)
         {
-            if (!IsOrganiser())
-                return RedirectToAction("Login", "Account");
+            var userId = GetUserId();
+            var role = GetRole();
 
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
-            var response = await client.GetAsync($"api/events/{id}/enrolments");
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
 
-            ViewBag.EventId = id;
+            if (role != "Organiser")
+                return StatusCode(403, "Only Organisers can delete events.");
 
-            var enrolments = new List<JsonElement>();
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-                enrolments = json.EnumerateArray().ToList();
-            }
-            else
-            {
-                ViewBag.Error = await response.Content.ReadAsStringAsync();
-            }
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == id);
 
-            return View(enrolments);
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            if (eventItem.Organizer.UserId != userId)
+                return StatusCode(403, "You can only delete your own events.");
+
+            eventItem.Status = "Closed";
+            await _context.SaveChangesAsync();
+            return NoContent();
         }
 
+        /// <summary>
+        /// Get all categories linked to a specific event.
+        /// </summary>
+        [HttpGet("{eventId}/categories")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetEventCategories(int eventId)
+        {
+            var exists = await _context.Events.AnyAsync(e => e.EventId == eventId);
+            if (!exists)
+                return NotFound("Event not found.");
+
+            var categories = await _context.EventCategories
+                .Where(ec => ec.EventId == eventId)
+                .Include(ec => ec.Category)
+                .Select(ec => new
+                {
+                    ec.EventCategoryId,
+                    ec.CategoryId,
+                    CategoryName = ec.Category.CategoryName,
+                    ec.Category.MinAge,
+                    ec.Category.MaxAge,
+                    ec.EntryFee
+                })
+                .ToListAsync();
+
+            return Ok(categories);
+        }
+
+        /// <summary>
+        /// Add a category to an event (with entry fee). Only the owning Organiser can do this.
+        /// </summary>
+        [HttpPost("{eventId}/categories")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> AddCategoryToEvent(int eventId, [FromBody] AddCategoryToEventDto dto)
+        {
+            var userId = GetUserId();
+            var role = GetRole();
+
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
+
+            if (role != "Organiser")
+                return StatusCode(403, "Only Organisers can add categories to events.");
+
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == eventId);
+
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            if (eventItem.Organizer.UserId != userId)
+                return StatusCode(403, "You can only manage categories for your own events.");
+
+            var categoryExists = await _context.Categories.AnyAsync(c => c.CategoryId == dto.CategoryId);
+            if (!categoryExists)
+                return BadRequest("Category does not exist.");
+
+            var alreadyLinked = await _context.EventCategories
+                .AnyAsync(ec => ec.EventId == eventId && ec.CategoryId == dto.CategoryId);
+
+            if (alreadyLinked)
+                return Conflict("This category is already linked to the event.");
+
+            var eventCategory = new EventCategory
+            {
+                EventId = eventId,
+                CategoryId = dto.CategoryId,
+                EntryFee = dto.EntryFee
+            };
+
+            _context.EventCategories.Add(eventCategory);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetEventCategories), new { eventId }, new
+            {
+                eventCategory.EventCategoryId,
+                Message = "Category added to event successfully"
+            });
+        }
+
+        /// <summary>
+        /// Get all enrolments for a specific event. Only the owning Organiser can view this.
+        /// </summary>
+        [HttpGet("{eventId}/enrolments")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetEventEnrolments(int eventId)
+        {
+            var userId = GetUserId();
+            var role = GetRole();
+
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
+
+            if (role != "Organiser")
+                return StatusCode(403, "Only Organisers can view enrolments.");
+
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == eventId);
+
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            if (eventItem.Organizer.UserId != userId)
+                return StatusCode(403, "You can only view enrolments for your own events.");
+
+            var enrolments = await _context.Enrollments
+                .Where(e => e.EventCategory.EventId == eventId)
+                .Include(e => e.Participant)
+                .Include(e => e.EventCategory)
+                    .ThenInclude(ec => ec.Category)
+                .Include(e => e.Result)
+                .Select(e => new
+                {
+                    e.EnrollmentId,
+                    e.BibNumber,
+                    e.RegistrationStatus,
+                    e.RegisteredAt,
+                    Participant = new
+                    {
+                        e.Participant.FirstName,
+                        e.Participant.LastName,
+                        e.Participant.ParticipantId
+                    },
+                    Category = e.EventCategory.Category.CategoryName,
+                    EntryFee = e.EventCategory.EntryFee,
+                    Result = e.Result == null ? null : new
+                    {
+                        e.Result.FinishTime,
+                        e.Result.FinishPosition,
+                        e.Result.PerformanceStatus
+                    }
+                })
+                .ToListAsync();
+
+            return Ok(enrolments);
+        }
+
+        [HttpPost("{id}/banner")]
+        public async Task<IActionResult> UploadBanner(int id, IFormFile file, [FromServices] BlobStorageService blobService)
+        {
+            var userId = GetUserId();
+            var role = GetRole();
+
+            if (userId == null) return Unauthorized();
+            if (role != "Organiser") return StatusCode(403, "Only Organisers can upload banners.");
+
+            var eventItem = await _context.Events
+                .Include(e => e.Organizer)
+                .FirstOrDefaultAsync(e => e.EventId == id);
+
+            if (eventItem == null) return NotFound("Event not found.");
+            if (eventItem.Organizer.UserId != userId)
+                return StatusCode(403, "You can only upload banners for your own events.");
+
+            if (file == null || file.Length == 0)
+                return BadRequest("No file uploaded.");
+
+            var url = await blobService.UploadEventBannerAsync(file);
+            eventItem.BannerUrl = url;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { bannerUrl = url });
+        }
+
+        /// <summary>
+        /// Get the results / leaderboard for a specific event (ordered by position).
+        /// </summary>
+        [HttpGet("{eventId}/results")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetEventResults(int eventId)
+        {
+            var exists = await _context.Events.AnyAsync(e => e.EventId == eventId);
+            if (!exists)
+                return NotFound("Event not found.");
+
+            var results = await _context.Results
+                .Where(r => r.Enrollment.EventCategory.EventId == eventId)
+                .Include(r => r.Enrollment)
+                    .ThenInclude(e => e.Participant)
+                .Include(r => r.Enrollment)
+                    .ThenInclude(e => e.EventCategory)
+                        .ThenInclude(ec => ec.Category)
+                .OrderBy(r => r.FinishPosition ?? int.MaxValue)
+                .Select(r => new
+                {
+                    r.ResultId,
+                    r.FinishTime,
+                    r.FinishPosition,
+                    r.PerformanceStatus,
+                    Participant = new
+                    {
+                        r.Enrollment.Participant.FirstName,
+                        r.Enrollment.Participant.LastName,
+                        r.Enrollment.BibNumber
+                    },
+                    Category = r.Enrollment.EventCategory.Category.CategoryName
+                })
+                .ToListAsync();
+
+            return Ok(results);
+        }
     }
-    
 }

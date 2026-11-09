@@ -1,87 +1,198 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using System.Net.Http.Json;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using RaceDayAPI.Data;
+using RaceDayAPI.DTOs;
+using RaceDayAPI.Models;
 
-namespace RaceDayMVC.Controllers
+namespace RaceDayAPI.Controllers
 {
-    public class EnrolmentsController : Controller
+    /// <summary>
+    /// Handle participant enrolments into events.
+    /// </summary>
+    [Route("api/enrolments")]
+    [ApiController]
+    public class EnrolmentsController : ControllerBase
     {
-        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ApplicationDbContext _context;
 
-        public EnrolmentsController(IHttpClientFactory httpClientFactory)
+        public EnrolmentsController(ApplicationDbContext context)
         {
-            _httpClientFactory = httpClientFactory;
+            _context = context;
         }
 
-        private bool IsParticipant() =>
-            HttpContext.Session.GetString("Role") == "Participant";
+        private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
+        private string? GetRole() => HttpContext.Session.GetString("Role");
 
-        // POST: /Enrolments/Create
+        /// <summary>
+        /// Enrol the current participant into an event category.
+        /// </summary>
         [HttpPost]
-        public async Task<IActionResult> Create(int eventId, int categoryId)
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> Enrol([FromBody] EnrolDto dto)
         {
-            if (!IsParticipant())
-                return RedirectToAction("Login", "Account");
+            var userId = GetUserId();
+            var role = GetRole();
 
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
 
-            var response = await client.PostAsJsonAsync("api/enrolments", new
+            if (role != "Participant")
+                return StatusCode(403, "Only Participants can enrol.");
+
+            var participant = await _context.ParticipantProfiles
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+
+            if (participant == null)
+                return BadRequest("Participant profile not found.");
+
+            var eventItem = await _context.Events.FindAsync(dto.EventId);
+            if (eventItem == null)
+                return NotFound("Event not found.");
+
+            if (eventItem.Status != "Upcoming")
+                return BadRequest("This event is closed or completed. Enrolment is not allowed.");
+
+            var eventCategory = await _context.EventCategories
+                .FirstOrDefaultAsync(ec => ec.EventId == dto.EventId && ec.CategoryId == dto.CategoryId);
+
+            if (eventCategory == null)
+                return BadRequest("This category is not available for the selected event.");
+
+            var alreadyEnrolled = await _context.Enrollments
+                .AnyAsync(e => e.ParticipantId == participant.ParticipantId
+                            && e.EventCategoryId == eventCategory.EventCategoryId
+                            && e.RegistrationStatus != "Cancelled");
+
+            if (alreadyEnrolled)
+                return Conflict("You are already enrolled in this event category.");
+
+            var enrolment = new Enrollment
             {
-                eventId,
-                categoryId
+                EventCategoryId = eventCategory.EventCategoryId,
+                ParticipantId = participant.ParticipantId,
+                RegistrationStatus = "Confirmed",
+                RegisteredAt = DateTime.UtcNow
+            };
+
+            _context.Enrollments.Add(enrolment);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetMyEnrolments), new { id = enrolment.EnrollmentId }, new
+            {
+                enrolment.EnrollmentId,
+                Message = "Successfully enrolled"
             });
-
-            if (response.IsSuccessStatusCode)
-            {
-                TempData["Success"] = "You have successfully enrolled!";
-            }
-            else
-            {
-                var error = await response.Content.ReadAsStringAsync();
-                TempData["Error"] = $"Enrolment failed: {error}";
-            }
-
-            return RedirectToAction("Details", "Events", new { id = eventId });
         }
 
-        // GET: /Enrolments/MyEnrolments
-        public async Task<IActionResult> MyEnrolments()
+        /// <summary>
+        /// Get all enrolments belonging to the currently logged-in participant.
+        /// </summary>
+        [HttpGet("me")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<IActionResult> GetMyEnrolments()
         {
-            if (!IsParticipant())
-                return RedirectToAction("Login", "Account");
+            var userId = GetUserId();
+            var role = GetRole();
 
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
-            var response = await client.GetAsync("api/enrolments/me");
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
 
-            var enrolments = new List<JsonElement>();
+            if (role != "Participant")
+                return StatusCode(403, "Only Participants can view their enrolments.");
 
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-                enrolments = json.EnumerateArray().ToList();
-            }
+            var participant = await _context.ParticipantProfiles
+                .FirstOrDefaultAsync(p => p.UserId == userId);
 
-            return View(enrolments);
+            if (participant == null)
+                return BadRequest("Participant profile not found.");
+
+            var enrolments = await _context.Enrollments
+                .Where(e => e.ParticipantId == participant.ParticipantId)
+                .Include(e => e.EventCategory)
+                    .ThenInclude(ec => ec.Event)
+                .Include(e => e.EventCategory)
+                    .ThenInclude(ec => ec.Category)
+                .Include(e => e.Result)
+                .Select(e => new
+                {
+                    e.EnrollmentId,
+                    e.BibNumber,
+                    e.RegistrationStatus,
+                    e.RegisteredAt,
+                    Event = new
+                    {
+                        e.EventCategory.Event.EventId,
+                        e.EventCategory.Event.EventName,
+                        e.EventCategory.Event.EventDate,
+                        e.EventCategory.Event.Location,
+                        e.EventCategory.Event.Status
+                    },
+                    Category = new
+                    {
+                        e.EventCategory.Category.CategoryName,
+                        e.EventCategory.EntryFee
+                    },
+                    Result = e.Result == null ? null : new
+                    {
+                        e.Result.FinishTime,
+                        e.Result.FinishPosition,
+                        e.Result.PerformanceStatus
+                    }
+                })
+                .ToListAsync();
+
+            return Ok(enrolments);
         }
 
-        // GET: /Enrolments/MyResults
-        public async Task<IActionResult> MyResults()
+        /// <summary>
+        /// Cancel an enrolment belonging to the current participant.
+        /// </summary>
+        [HttpPut("{id}/cancel")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> CancelEnrolment(int id)
         {
-            if (!IsParticipant())
-                return RedirectToAction("Login", "Account");
+            var userId = GetUserId();
+            var role = GetRole();
 
-            var client = _httpClientFactory.CreateClient("RaceDayAPI");
-            var response = await client.GetAsync("api/users/me/results");
+            if (userId == null)
+                return Unauthorized("You must be logged in.");
 
-            var results = new List<JsonElement>();
+            if (role != "Participant")
+                return StatusCode(403, "Only Participants can cancel enrolments.");
 
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-                results = json.EnumerateArray().ToList();
-            }
+            var participant = await _context.ParticipantProfiles
+                .FirstOrDefaultAsync(p => p.UserId == userId);
 
-            return View(results);
+            if (participant == null)
+                return BadRequest("Participant profile not found.");
+
+            var enrolment = await _context.Enrollments
+                .FirstOrDefaultAsync(e => e.EnrollmentId == id);
+
+            if (enrolment == null)
+                return NotFound("Enrolment not found.");
+
+            if (enrolment.ParticipantId != participant.ParticipantId)
+                return StatusCode(403, "You can only cancel your own enrolments.");
+
+            if (enrolment.RegistrationStatus == "Cancelled")
+                return BadRequest("This enrolment is already cancelled.");
+
+            enrolment.RegistrationStatus = "Cancelled";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Message = "Enrolment cancelled successfully" });
         }
     }
 }

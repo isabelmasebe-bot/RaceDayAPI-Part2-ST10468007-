@@ -3,9 +3,13 @@ using Microsoft.EntityFrameworkCore;
 using RaceDayAPI.Data;
 using RaceDayAPI.DTOs;
 using RaceDayAPI.Models;
+using RaceDayAPI.Services;
 
 namespace RaceDayAPI.Controllers
 {
+    /// <summary>
+    /// Manage the currently logged-in user's profile.
+    /// </summary>
     [Route("api/users")]
     [ApiController]
     public class UsersController : ControllerBase
@@ -18,10 +22,14 @@ namespace RaceDayAPI.Controllers
         }
 
         private int? GetUserId() => HttpContext.Session.GetInt32("UserId");
-        private string? GetRole() => HttpContext.Session.GetString("Role");
 
-        // GET: /api/users/me
+        /// <summary>
+        /// Get the profile of the currently logged-in user.
+        /// </summary>
         [HttpGet("me")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetMyProfile()
         {
             var userId = GetUserId();
@@ -52,7 +60,9 @@ namespace RaceDayAPI.Controllers
                     }
                 });
             }
-            else if (user.Role == "Participant" && user.ParticipantProfile != null)
+
+
+            if (user.Role == "Participant" && user.ParticipantProfile != null)
             {
                 return Ok(new
                 {
@@ -71,17 +81,38 @@ namespace RaceDayAPI.Controllers
                 });
             }
 
-            return Ok(new
-            {
-                user.UserId,
-                user.Email,
-                user.Role,
-                user.CreatedAt
-            });
+            return Ok(new { user.UserId, user.Email, user.Role, user.CreatedAt });
         }
 
-        // PUT: /api/users/me
+        [HttpPost("me/profile-picture")]
+        public async Task<IActionResult> UploadProfilePicture(IFormFile file, [FromServices] BlobStorageService blobService)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var participant = await _context.ParticipantProfiles
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+
+            if (participant == null)
+                return BadRequest("Only Participants have profile pictures.");
+
+            if (file == null || file.Length == 0)
+                return BadRequest("No file uploaded.");
+
+            var url = await blobService.UploadProfilePictureAsync(file);
+            participant.ProfilePictureUrl = url;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { profilePictureUrl = url });
+        }
+
+        /// <summary>
+        /// Update the profile of the currently logged-in user.
+        /// </summary>
         [HttpPut("me")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileDto dto)
         {
             var userId = GetUserId();
@@ -100,7 +131,6 @@ namespace RaceDayAPI.Controllers
             {
                 if (!string.IsNullOrWhiteSpace(dto.OrganisationName))
                     user.OrganizerProfile.OrganisationName = dto.OrganisationName;
-
                 if (dto.Phone != null)
                     user.OrganizerProfile.ContactPhone = dto.Phone;
             }
@@ -108,19 +138,15 @@ namespace RaceDayAPI.Controllers
             {
                 if (!string.IsNullOrWhiteSpace(dto.FirstName))
                     user.ParticipantProfile.FirstName = dto.FirstName;
-
                 if (!string.IsNullOrWhiteSpace(dto.LastName))
                     user.ParticipantProfile.LastName = dto.LastName;
-
                 if (dto.DateOfBirth.HasValue)
                     user.ParticipantProfile.DateOfBirth = dto.DateOfBirth;
-
                 if (dto.EmergencyContact != null)
                     user.ParticipantProfile.EmergencyContact = dto.EmergencyContact;
             }
 
             await _context.SaveChangesAsync();
-
             return Ok(new { Message = "Profile updated successfully" });
         }
     }
