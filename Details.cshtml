@@ -38,9 +38,14 @@
         {
             <div>
                 <a asp-action="Index" class="btn btn-outline-secondary btn-sm">Back to My Events</a>
+                <a asp-action="Enrolments" asp-route-id="@Model.GetProperty("eventId").GetInt32()"
+                   class="btn btn-outline-info">
+                    View Enrolments
+                </a>
             </div>
         }
     </div>
+
 
     <hr />
 
@@ -52,19 +57,29 @@
         <div class="row">
             @foreach (var cat in categories.EnumerateArray())
             {
+                int categoryId = 0;
+                if (cat.TryGetProperty("categoryId", out var cid))
+                    categoryId = cid.GetInt32();
+
+                string categoryName = cat.TryGetProperty("categoryName", out var cn)
+                ? cn.GetString() ?? "Category"
+                : "Category";
+
+                decimal entryFee = cat.TryGetProperty("entryFee", out var fee)
+                ? fee.GetDecimal()
+                : 0;
+
                 <div class="col-md-4 mb-3">
                     <div class="card h-100 shadow-sm">
                         <div class="card-body">
-                            <h5 class="card-title">@cat.GetProperty("categoryName").GetString()</h5>
-                            @if (cat.TryGetProperty("entryFee", out var fee))
-                            {
-                                <p class="card-text">Entry Fee: R @fee.GetDecimal()</p>
-                            }
-                            @if (role == "Participant")
+                            <h5 class="card-title">@categoryName</h5>
+                            <p class="card-text">Entry Fee: R @entryFee</p>
+
+                            @if (Context.Session.GetString("Role") == "Participant" && categoryId > 0)
                             {
                                 <form asp-controller="Enrolments" asp-action="Create" method="post">
                                     <input type="hidden" name="eventId" value="@Model.GetProperty("eventId").GetInt32()" />
-                                    <input type="hidden" name="categoryId" value="@cat.GetProperty("categoryId").GetInt32()" />
+                                    <input type="hidden" name="categoryId" value="@categoryId" />
                                     <button type="submit" class="btn btn-primary btn-sm">Enrol</button>
                                 </form>
                             }
